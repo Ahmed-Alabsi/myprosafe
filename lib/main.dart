@@ -2,7 +2,6 @@
 import 'package:provider/provider.dart';
 import 'package:app_links/app_links.dart';
 import 'dart:async';
-
 import 'controllers/auth_controller.dart';
 import 'controllers/scan_controller.dart';
 import 'controllers/settings_controller.dart';

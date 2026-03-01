@@ -53,41 +53,36 @@ class VirusTotalService {
   }
 
   // دالة لفحص الرابط
-  Future<ScanResult?> scanUrl(String url) async {
-    try {
-      print('🔍 بدء فحص الرابط: $url');
-      
-      // التحقق من صحة الرابط أولاً
-      if (!isValidUrl(url)) {
-        return _createErrorResult(url, 'الرابط غير صحيح');
-      }
+  // في ملف lib/services/virustotal_service.dart
 
-      // 1. أولاً: إرسال الرابط للفحص
-      final scanResponse = await http.post(
-        Uri.parse('$_baseUrl/urls'),
-        headers: {
-          'x-apikey': _apiKey,
-          'accept': 'application/json',
-        },
-        body: {'url': url},
-      ).timeout(const Duration(seconds: 10));
+Future<ScanResult?> scanUrl(String url) async {
+  try {
+    print('🔍 بدء فحص الرابط: $url');
 
-      if (scanResponse.statusCode != 200) {
-        print('❌ فشل إرسال الرابط: ${scanResponse.statusCode} - ${scanResponse.body}');
-        if (scanResponse.statusCode == 401) {
-          return _createErrorResult(url, 'مفتاح API غير صالح');
-        }
-        return _createErrorResult(url, 'فشل الاتصال بخدمة الفحص');
-      }
+    // 1. إرسال الرابط للفحص
+    final scanResponse = await http.post(
+      Uri.parse('$_baseUrl/urls'),
+      headers: {
+        'x-apikey': _apiKey,
+        'accept': 'application/json',
+      },
+      body: {'url': url},
+    ).timeout(const Duration(seconds: 10));
 
-      final scanData = jsonDecode(scanResponse.body);
-      final analysisId = scanData['data']['id'];
-      print('✅ تم إرسال الرابط، معرف التحليل: $analysisId');
+    if (scanResponse.statusCode != 200) {
+      return _createErrorResult(url, 'فشل الاتصال بخدمة الفحص');
+    }
 
-      // 2. انتظار قليل لبدء التحليل
-      await Future.delayed(const Duration(seconds: 3));
+    final scanData = jsonDecode(scanResponse.body);
+    final analysisId = scanData['data']['id'];
+    print('✅ تم إرسال الرابط، معرف التحليل: $analysisId');
 
-      // 3. جلب نتيجة الفحص
+    // 2. انتظار اكتمال التحليل (Polling)
+    const int maxAttempts = 10;
+    int attempt = 0;
+    while (attempt < maxAttempts) {
+      await Future.delayed(const Duration(seconds: 3)); // انتظر 3 ثواني بين كل محاولة
+
       final reportResponse = await http.get(
         Uri.parse('$_baseUrl/analyses/$analysisId'),
         headers: {'x-apikey': _apiKey},
@@ -95,17 +90,26 @@ class VirusTotalService {
 
       if (reportResponse.statusCode == 200) {
         final reportData = jsonDecode(reportResponse.body);
-        print('✅ تم استلام نتيجة الفحص بنجاح');
-        return _parseVirusTotalResponse(url, reportData);
-      } else {
-        print('❌ فشل جلب نتيجة الفحص: ${reportResponse.statusCode}');
-        return _createErrorResult(url, 'فشل جلب نتيجة الفحص');
+        final status = reportData['data']['attributes']['status'];
+
+        if (status == 'completed') {
+          print('✅ اكتمل التحليل وجلب النتيجة');
+          return _parseVirusTotalResponse(url, reportData);
+        } else {
+          print('⏳ التحليل لا يزال قيد التنفيذ (الحالة: $status)، المحاولة ${attempt + 1}');
+        }
       }
-    } catch (e) {
-      print('❌ خطأ في الاتصال بـ VirusTotal: $e');
-      return _createErrorResult(url, 'حدث خطأ في الاتصال: ${e.toString()}');
+      attempt++;
     }
+
+    // إذا انتهت المحاولات دون اكتمال
+    return _createErrorResult(url, 'انتهت مهلة انتظار نتيجة الفحص');
+    
+  } catch (e) {
+    print('❌ خطأ في الاتصال بـ VirusTotal: $e');
+    return _createErrorResult(url, 'حدث خطأ في الاتصال');
   }
+}
 
   // دالة لتحليل نتيجة VirusTotal
   ScanResult _parseVirusTotalResponse(String url, Map<String, dynamic> data) {
